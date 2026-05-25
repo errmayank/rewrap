@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { CheckIcon, ClipboardIcon, MoonIcon, SunIcon } from "phosphor-svelte";
+  import {
+    CheckIcon,
+    CopySimpleIcon,
+    MinusIcon,
+    MoonIcon,
+    PlusIcon,
+    SunIcon,
+  } from "phosphor-svelte";
   import { toggleMode } from "mode-watcher";
 
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import { Label } from "$lib/components/ui/label/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { DEFAULT_LINE_WIDTH, rewrap } from "$lib/rewrap";
 
@@ -36,6 +42,19 @@
     widthInput = (event.currentTarget as HTMLInputElement).value;
   }
 
+  function decreaseWidth() {
+    widthInput = String(Math.max(1, lineWidth - 1));
+  }
+
+  function increaseWidth() {
+    widthInput = String(lineWidth + 1);
+  }
+
+  function clearInput() {
+    inputText = "";
+    hasCopied = false;
+  }
+
   async function copyOutput() {
     if (rewrappedText === "") {
       return;
@@ -61,7 +80,7 @@
 <main class="min-h-dvh bg-background text-foreground">
   <div class="mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 py-4 sm:px-6 lg:px-8">
     <header class="flex h-12 items-center justify-between gap-4">
-      <h1 class="text-lg font-semibold tracking-normal">Rewrap</h1>
+      <h1 class="select-none text-lg font-semibold tracking-normal">Rewrap</h1>
 
       <Button
         type="button"
@@ -80,59 +99,99 @@
     <section class="flex min-h-0 flex-1 flex-col gap-4 py-4">
       <div class="flex min-h-80 flex-1 flex-col gap-3">
         <div class="flex min-h-9 flex-wrap items-center justify-between gap-3">
-          <Label for="input-text">Input</Label>
+          <span class="text-sm leading-none font-medium select-none">Input</span>
 
-          <Label class="flex-wrap" for="line-width">
-            Width
-            <Input
-              class="w-24"
-              id="line-width"
-              inputmode="numeric"
-              min="1"
-              step="1"
-              type="number"
-              value={widthInput}
-              oninput={handleWidthInput}
-            />
-          </Label>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm leading-none font-medium select-none">Width</span>
+              <div class="flex items-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  class="rounded-r-none"
+                  aria-label="Decrease width"
+                  title="Decrease width"
+                  disabled={lineWidth <= 1}
+                  onclick={decreaseWidth}
+                >
+                  <MinusIcon class="size-4" aria-hidden="true" />
+                </Button>
+
+                <Input
+                  class="-ml-px w-16 rounded-none text-center font-mono"
+                  id="line-width"
+                  inputmode="numeric"
+                  min="1"
+                  step="1"
+                  type="number"
+                  value={widthInput}
+                  oninput={handleWidthInput}
+                />
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  class="-ml-px rounded-l-none"
+                  aria-label="Increase width"
+                  title="Increase width"
+                  onclick={increaseWidth}
+                >
+                  <PlusIcon class="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              class="w-20 font-normal"
+              aria-label="Clear input"
+              title="Clear input"
+              disabled={inputText === ""}
+              onclick={clearInput}
+            >
+              Clear
+            </Button>
+          </div>
         </div>
 
         <Textarea
-          class="min-h-0 flex-1 resize-none bg-card px-4 py-3 leading-6"
+          class="min-h-0 flex-1 resize-none bg-card px-4 py-3 font-mono leading-6"
           id="input-text"
           value={inputText}
           oninput={handleInputText}
           spellcheck="false"
-          placeholder="Paste text to wrap..."
+          placeholder="Text to wrap..."
         />
       </div>
 
       <div class="flex min-h-80 flex-1 flex-col gap-3">
         <div class="flex min-h-9 items-center justify-between gap-3">
-          <div class="flex items-baseline gap-3">
-            <Label for="output-text">Output</Label>
-            <span class="text-xs text-muted-foreground">{outputLineCount} lines</span>
-          </div>
+          <span class="text-sm leading-none font-medium select-none">Output</span>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label={hasCopied ? "Copied output" : "Copy output"}
-            title={hasCopied ? "Copied output" : "Copy output"}
-            disabled={rewrappedText === ""}
-            onclick={copyOutput}
-          >
-            {#if hasCopied}
-              <CheckIcon size={18} aria-hidden="true" />
-            {:else}
-              <ClipboardIcon size={18} aria-hidden="true" />
-            {/if}
-          </Button>
+          <div class="flex items-center gap-3">
+            <span class="font-mono text-xs text-muted-foreground">{outputLineCount} lines</span>
+
+            <Button
+              type="button"
+              size="icon"
+              aria-label={hasCopied ? "Copied output" : "Copy output"}
+              title={hasCopied ? "Copied output" : "Copy output"}
+              disabled={rewrappedText === ""}
+              onclick={copyOutput}
+            >
+              {#if hasCopied}
+                <CheckIcon class="size-4.5" aria-hidden="true" />
+              {:else}
+                <CopySimpleIcon class="size-4.5" aria-hidden="true" />
+              {/if}
+            </Button>
+          </div>
         </div>
 
         <Textarea
-          class="min-h-0 flex-1 resize-none bg-muted/30 px-4 py-3 leading-6"
+          class="min-h-0 flex-1 resize-none bg-muted/30 px-4 py-3 font-mono leading-6"
           id="output-text"
           readonly
           value={rewrappedText}
