@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" viewBox="0 0 32 32">
+  <path
+    fill="#000"
+    d="M27 6.875a1.125 1.125 0 0 1 0 2.25H5a1.125 1.125 0 0 1 0-2.25zM21 11.875a1.125 1.125 0 0 1 0 2.25H5a1.125 1.125 0 0 1 0-2.25zM27 16.875a1.125 1.125 0 0 1 0 2.25H5a1.125 1.125 0 0 1 0-2.25zM21 21.875a1.125 1.125 0 0 1 0 2.25H5a1.125 1.125 0 0 1 0-2.25z"
+  />
+  <style>
+    @media (prefers-color-scheme: light) {
+      :root {
+        filter: none;
+      }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        filter: invert(100%);
+      }
+    }
+  </style>
+</svg>
