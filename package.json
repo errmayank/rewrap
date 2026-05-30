@@ -47,6 +47,8 @@
     "wrangler": "4.94.0"
   },
   "dependencies": {
-    "mode-watcher": "1.1.0"
+    "dexie": "4.4.2",
+    "mode-watcher": "1.1.0",
+    "valibot": "1.4.1"
   }
 }

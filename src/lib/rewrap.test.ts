@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_LINE_WIDTH, rewrap } from "./rewrap";
+import {
+  DEFAULT_WRAP_WIDTH,
+  MAX_WRAP_WIDTH,
+  MIN_WRAP_WIDTH,
+  parseWrapWidth,
+  rewrap,
+} from "./rewrap";
 
 describe("rewrap", () => {
   it("wraps text on whitespace at the requested width", () => {
@@ -10,7 +16,7 @@ describe("rewrap", () => {
   });
 
   it("uses a 72 character default width", () => {
-    expect(DEFAULT_LINE_WIDTH).toBe(72);
+    expect(DEFAULT_WRAP_WIDTH).toBe(72);
     expect(
       rewrap(
         "This sentence is intentionally long enough to wrap when the default line width is used.",
@@ -81,5 +87,28 @@ describe("rewrap", () => {
   it("requires a positive integer width", () => {
     expect(() => rewrap("text", 0)).toThrow(RangeError);
     expect(() => rewrap("text", 1.5)).toThrow(RangeError);
+  });
+});
+
+describe("parseWrapWidth", () => {
+  it("accepts positive integer numbers and digit strings", () => {
+    expect(parseWrapWidth(72)).toBe(72);
+    expect(parseWrapWidth("72")).toBe(72);
+    expect(parseWrapWidth("0072")).toBe(72);
+    expect(parseWrapWidth(MIN_WRAP_WIDTH)).toBe(MIN_WRAP_WIDTH);
+    expect(parseWrapWidth(MAX_WRAP_WIDTH)).toBe(MAX_WRAP_WIDTH);
+  });
+
+  it("rejects values outside the supported range", () => {
+    expect(parseWrapWidth(0)).toBeNull();
+    expect(parseWrapWidth(-1)).toBeNull();
+    expect(parseWrapWidth(MAX_WRAP_WIDTH + 1)).toBeNull();
+  });
+
+  it("rejects width input that is not plain digits", () => {
+    expect(parseWrapWidth("")).toBeNull();
+    expect(parseWrapWidth("72.5")).toBeNull();
+    expect(parseWrapWidth("1e3")).toBeNull();
+    expect(parseWrapWidth(" 72")).toBeNull();
   });
 });

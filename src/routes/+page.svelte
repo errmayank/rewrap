@@ -7,54 +7,156 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { DEFAULT_LINE_WIDTH, rewrap } from "$lib/rewrap";
+  import { Toast, ToastViewport } from "$lib/components/ui/toast/index.js";
+  import { rewrapDatabase, type RewrapSnapshot } from "$lib/persistence";
+  import {
+    DEFAULT_WRAP_WIDTH,
+    MAX_WRAP_WIDTH,
+    MIN_WRAP_WIDTH,
+    parseWrapWidth,
+    rewrap,
+  } from "$lib/rewrap";
 
-  let inputText = $state("");
-  let widthInput = $state(String(DEFAULT_LINE_WIDTH));
-  let hasCopied = $state(false);
-  let copyResetTimeout: ReturnType<typeof setTimeout> | undefined;
+  type ErrorToast = "snapshot_load_error" | "snapshot_save_error" | "copy_to_clipboard_error";
 
-  const parsedLineWidth = $derived(Number(widthInput));
-  const lineWidth = $derived(
-    Number.isInteger(parsedLineWidth) && parsedLineWidth > 0 ? parsedLineWidth : DEFAULT_LINE_WIDTH,
-  );
-  const wrapWidthInputWidth = $derived(
-    `calc(${Math.max(widthInput.length, String(DEFAULT_LINE_WIDTH).length)}ch + 2.25rem)`,
-  );
-  const rewrappedText = $derived(rewrap(inputText, lineWidth));
+  let textInput = $state("");
+  let widthInput = $state(String(DEFAULT_WRAP_WIDTH));
+  let acceptedWrapWidth = $state(DEFAULT_WRAP_WIDTH);
+  let snapshotUpdatedAt = $state<number | null>(null);
+  let isSnapshotLoaded = $state(false);
+  let errorToasts = $state<ErrorToast[]>([]);
+  let outputCopied = $state(false);
+  let copyResetTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  const wrapWidth = $derived(parseWrapWidth(widthInput) ?? acceptedWrapWidth);
+  const rewrappedText = $derived(rewrap(textInput, wrapWidth));
   const outputLineCount = $derived(rewrappedText === "" ? 0 : rewrappedText.split("\n").length);
 
   $effect(() => {
+    const controller = new AbortController();
+    const subscription = rewrapDatabase.watchSnapshot({
+      next(snapshot) {
+        restoreSnapshot(snapshot);
+        isSnapshotLoaded = true;
+        dismissErrorToast("snapshot_load_error");
+      },
+      error(error) {
+        console.error("Failed to watch Rewrap snapshot", error);
+        isSnapshotLoaded = true;
+        showErrorToast("snapshot_load_error");
+      },
+    });
+
+    window.addEventListener("pagehide", flushPendingSnapshot, { signal: controller.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.visibilityState === "hidden") {
+          flushPendingSnapshot();
+        }
+      },
+      { signal: controller.signal },
+    );
+
     return () => {
+      subscription.unsubscribe();
+      controller.abort();
+      flushPendingSnapshot();
+
       if (copyResetTimeout) {
         clearTimeout(copyResetTimeout);
       }
     };
   });
 
-  function handleInputText(event: Event) {
-    inputText = (event.currentTarget as HTMLTextAreaElement).value;
+  function restoreSnapshot(snapshot: RewrapSnapshot | null) {
+    if (snapshot === null) {
+      return;
+    }
+
+    if (snapshotUpdatedAt !== null && snapshot.updatedAt < snapshotUpdatedAt) {
+      return;
+    }
+
+    snapshotUpdatedAt = snapshot.updatedAt;
+
+    if (snapshot.text === textInput && snapshot.wrapWidth === acceptedWrapWidth) {
+      return;
+    }
+
+    textInput = snapshot.text;
+    acceptedWrapWidth = snapshot.wrapWidth;
+    widthInput = String(snapshot.wrapWidth);
   }
 
-  function handleWidthInput(event: Event) {
-    widthInput = (event.currentTarget as HTMLInputElement).value;
+  function saveSnapshot(options?: { immediate?: boolean }) {
+    try {
+      const snapshot = rewrapDatabase.saveSnapshot(textInput, acceptedWrapWidth, {
+        ...options,
+        onError: handleSnapshotSaveError,
+        onSuccess: () => {
+          dismissErrorToast("snapshot_save_error");
+        },
+      });
+
+      snapshotUpdatedAt = Math.max(snapshotUpdatedAt ?? 0, snapshot.updatedAt);
+    } catch (error) {
+      handleSnapshotSaveError(error);
+    }
+  }
+
+  function flushPendingSnapshot() {
+    void rewrapDatabase
+      .flushPendingSnapshot()
+      .then(() => {
+        dismissErrorToast("snapshot_save_error");
+      })
+      .catch(handleSnapshotSaveError);
+  }
+
+  function handleSnapshotSaveError(error: unknown) {
+    console.error("Failed to save Rewrap snapshot", error);
+    showErrorToast("snapshot_save_error");
+  }
+
+  function handleTextInput(event: Event & { currentTarget: HTMLTextAreaElement }) {
+    textInput = event.currentTarget.value;
+    saveSnapshot();
+  }
+
+  function handleWidthInput(event: Event & { currentTarget: HTMLInputElement }) {
+    widthInput = event.currentTarget.value;
   }
 
   function handleWidthBlur() {
-    widthInput = String(lineWidth);
+    const nextWrapWidth = wrapWidth;
+    widthInput = String(nextWrapWidth);
+
+    if (nextWrapWidth === acceptedWrapWidth) {
+      flushPendingSnapshot();
+      return;
+    }
+
+    acceptedWrapWidth = nextWrapWidth;
+    saveSnapshot({ immediate: true });
   }
 
-  function decreaseWidth() {
-    widthInput = String(Math.max(1, lineWidth - 1));
-  }
+  function setWrapWidth(nextWrapWidth: number) {
+    const nextValidWrapWidth = parseWrapWidth(nextWrapWidth);
 
-  function increaseWidth() {
-    widthInput = String(lineWidth + 1);
+    if (nextValidWrapWidth === null) {
+      return;
+    }
+
+    widthInput = String(nextValidWrapWidth);
+    acceptedWrapWidth = nextValidWrapWidth;
+    saveSnapshot();
   }
 
   function clearInput() {
-    inputText = "";
-    hasCopied = false;
+    textInput = "";
+    outputCopied = false;
+    saveSnapshot();
   }
 
   async function copyOutput() {
@@ -62,16 +164,51 @@
       return;
     }
 
-    await navigator.clipboard.writeText(rewrappedText);
-    hasCopied = true;
+    try {
+      await navigator.clipboard.writeText(rewrappedText);
+      outputCopied = true;
+      dismissErrorToast("copy_to_clipboard_error");
+    } catch (error) {
+      console.error("Failed to copy Rewrap output", error);
+      showErrorToast("copy_to_clipboard_error");
+      outputCopied = false;
+      return;
+    }
 
     if (copyResetTimeout) {
       clearTimeout(copyResetTimeout);
     }
 
     copyResetTimeout = setTimeout(() => {
-      hasCopied = false;
+      outputCopied = false;
     }, 1600);
+  }
+
+  function showErrorToast(errorToast: ErrorToast) {
+    if (errorToasts.includes(errorToast)) {
+      return;
+    }
+
+    errorToasts = [...errorToasts, errorToast];
+  }
+
+  function dismissErrorToast(errorToast: ErrorToast) {
+    errorToasts = errorToasts.filter(visibleErrorToast => visibleErrorToast !== errorToast);
+  }
+
+  function getErrorToastMessage(errorToast: ErrorToast) {
+    switch (errorToast) {
+      case "snapshot_load_error":
+        return "Unable to restore saved changes.";
+      case "snapshot_save_error":
+        return "Unable to save changes.";
+      case "copy_to_clipboard_error":
+        return "Unable to copy to clipboard.";
+      default: {
+        const unhandledErrorToast: never = errorToast;
+        return unhandledErrorToast;
+      }
+    }
   }
 </script>
 
@@ -123,7 +260,7 @@
 
           <div class="flex flex-wrap items-center gap-1.5">
             <div class="flex flex-wrap items-center gap-1.5">
-              <Label class="sr-only" for="line-width">Width</Label>
+              <Label class="sr-only" for="wrap-width">Width</Label>
               <div class="flex h-7 items-center">
                 <Button
                   type="button"
@@ -132,21 +269,21 @@
                   class="rounded-r-none border-r-0 focus-visible:z-10"
                   aria-label="Decrease wrap width"
                   title="Decrease wrap width"
-                  disabled={lineWidth <= 1}
-                  onclick={decreaseWidth}
+                  disabled={!isSnapshotLoaded || wrapWidth <= MIN_WRAP_WIDTH}
+                  onclick={() => setWrapWidth(wrapWidth - MIN_WRAP_WIDTH)}
                 >
                   <MinusIcon class="size-4" aria-hidden="true" />
                 </Button>
 
                 <Input
-                  id="line-width"
+                  id="wrap-width"
                   class="rounded-none text-center font-mono focus-visible:z-10 [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
                   inputmode="numeric"
-                  min="1"
-                  step="1"
-                  style={`width: ${wrapWidthInputWidth}`}
-                  type="number"
-                  value={widthInput}
+                  pattern="[0-9]*"
+                  style={`width: min(calc(${Math.max(widthInput.length, String(DEFAULT_WRAP_WIDTH).length)}ch + 2.25rem), 12rem)`}
+                  type="text"
+                  disabled={!isSnapshotLoaded}
+                  value={isSnapshotLoaded ? widthInput : ""}
                   onblur={handleWidthBlur}
                   oninput={handleWidthInput}
                 />
@@ -158,7 +295,8 @@
                   class="rounded-l-none border-l-0 focus-visible:z-10"
                   aria-label="Increase wrap width"
                   title="Increase wrap width"
-                  onclick={increaseWidth}
+                  disabled={!isSnapshotLoaded || wrapWidth >= MAX_WRAP_WIDTH}
+                  onclick={() => setWrapWidth(wrapWidth + MIN_WRAP_WIDTH)}
                 >
                   <PlusIcon class="size-4" aria-hidden="true" />
                 </Button>
@@ -171,7 +309,7 @@
               class="font-mono uppercase text-destructive hover:text-destructive"
               aria-label="Clear input"
               title="Clear input"
-              disabled={inputText === ""}
+              disabled={!isSnapshotLoaded || textInput === ""}
               onclick={clearInput}
             >
               Clear
@@ -181,10 +319,12 @@
 
         <Textarea
           id="input-text"
-          value={inputText}
-          oninput={handleInputText}
+          value={textInput}
+          disabled={!isSnapshotLoaded}
+          onblur={flushPendingSnapshot}
+          oninput={handleTextInput}
           spellcheck="false"
-          placeholder="Text to wrap..."
+          placeholder={isSnapshotLoaded ? "Text to wrap..." : ""}
           wrap="off"
         />
       </div>
@@ -205,12 +345,12 @@
               type="button"
               variant="outline"
               size="icon"
-              aria-label={hasCopied ? "Copied output" : "Copy output"}
-              title={hasCopied ? "Copied output" : "Copy output"}
-              disabled={rewrappedText === ""}
+              aria-label={outputCopied ? "Copied output" : "Copy output"}
+              title={outputCopied ? "Copied output" : "Copy output"}
+              disabled={!isSnapshotLoaded || rewrappedText === ""}
               onclick={copyOutput}
             >
-              {#if hasCopied}
+              {#if outputCopied}
                 <CheckIcon class="size-4" aria-hidden="true" />
               {:else}
                 <CopySimpleIcon class="size-4" aria-hidden="true" />
@@ -223,6 +363,7 @@
           id="output-text"
           aria-describedby="output-line-count"
           readonly
+          disabled={!isSnapshotLoaded}
           value={rewrappedText}
           spellcheck="false"
           wrap="off"
@@ -231,3 +372,11 @@
     </section>
   </div>
 </main>
+
+<ToastViewport items={errorToasts}>
+  {#snippet children(errorToast)}
+    <Toast variant="destructive" onClose={() => dismissErrorToast(errorToast)}>
+      {getErrorToastMessage(errorToast)}
+    </Toast>
+  {/snippet}
+</ToastViewport>
